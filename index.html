@@ -478,10 +478,18 @@
                           <span className="text-[10px] text-slate-500 font-semibold block">{user.isAdmin ? 'Administrador' : 'Turno 24h'}</span>
                         </div>
                       </div>
-                      <div className="text-right bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-xs">
-                        <div className="font-bold text-slate-800">{stats.days} días</div>
-                        <div className="font-semibold text-blue-600">{stats.hours}h tot.</div>
-                      </div>
+                      
+                      {/* SI ES ADMINISTRADOR SE OCULTAN DÍAS Y HORAS, SE MUESTRA INSIGNIA DE GESTIÓN */}
+                      {user.isAdmin ? (
+                        <div className="text-right bg-slate-200/60 px-2.5 py-1 rounded-lg border border-slate-300 text-[11px] font-bold text-slate-700">
+                          Superusuario
+                        </div>
+                      ) : (
+                        <div className="text-right bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-xs">
+                          <div className="font-bold text-slate-800">{stats.days} días</div>
+                          <div className="font-semibold text-blue-600">{stats.hours}h tot.</div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
