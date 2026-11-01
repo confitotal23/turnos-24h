@@ -56,7 +56,7 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // CONFIGURACIÓN DE FIREBASE (CONECTAR CON LA CONSOLA)
+    // CONFIGURACIÓN DE FIREBASE (MANTÉN TUS CLAVES AQUÍ)
     const firebaseConfig = {
 
   apiKey: "AIzaSyAGgDMwopsVMHCJvzwzqvwPOVZdZeUXSsI",
@@ -73,8 +73,7 @@
 
 };
 
-
-    // Inicializar Firebase de forma segura (con fallback a local si no está configurado)
+    // Inicializar Firebase de forma segura
     let isFirebaseActive = false;
     let db = null;
     let auth = null;
@@ -87,10 +86,10 @@
         isFirebaseActive = true;
       }
     } catch (e) {
-      console.warn("Firebase no configurado aún. Usando almacenamiento local temporal.");
+      console.warn("Error o falta de clave en Firebase:", e);
     }
 
-    // 1. CONFIGURACIÓN DE NOMBRES Y CUENTAS GMAIL REALES (CORREOS OCULTOS EN INTERFAZ)
+    // 1. CONFIGURACIÓN DE NOMBRES Y CUENTAS GMAIL REALES
     const USERS = [
       { 
         id: 'usr_admin', 
@@ -205,7 +204,36 @@
       const [adminSelectedUser, setAdminSelectedUser] = useState('');
       const [targetSwapDate, setTargetSwapDate] = useState('');
       const [swapNote, setSwapNote] = useState('');
-      const [historyFilterMonth, setHistoryFilterMonth] = useState('2026-11');
+
+      // CONEXIÓN EN TIEMPO REAL CON FIREBASE FIRESTORE
+      useEffect(() => {
+        if (!isFirebaseActive || !db) return;
+
+        // Escuchar cambios de turnos en directo con snapshot en tiempo real
+        const unsubscribeShifts = db.collection('shifts').onSnapshot((snapshot) => {
+          const remoteShifts = {};
+          snapshot.forEach((doc) => {
+            remoteShifts[doc.id] = doc.data().assignedUserId;
+          });
+          if (Object.keys(remoteShifts).length > 0) {
+            setShifts(prev => ({ ...prev, ...remoteShifts }));
+          }
+        }, (err) => console.error("Error en tiempo real turnos:", err));
+
+        // Escuchar solicitudes de permuta en directo
+        const unsubscribeRequests = db.collection('swap_requests').onSnapshot((snapshot) => {
+          const remoteRequests = [];
+          snapshot.forEach((doc) => {
+            remoteRequests.push({ id: doc.id, ...doc.data() });
+          });
+          setRequests(remoteRequests);
+        }, (err) => console.error("Error en tiempo real solicitudes:", err));
+
+        return () => {
+          unsubscribeShifts();
+          unsubscribeRequests();
+        };
+      }, []);
 
       useEffect(() => {
         if (window.lucide) {
@@ -217,77 +245,6 @@
         if (!dateStr) return '';
         const [year, month, day] = dateStr.split('-');
         return `${day}/${month}/${year}`;
-      };
-
-      // EXPORTAR A EXCEL / CSV
-      const handleExportCSV = () => {
-        const monthName = currentMonth.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-        let csvContent = "data:text/csv;charset=utf-8,Fecha,Dia,Persona Asignada,Horas Servicio\n";
-
-        const days = getDaysInMonth();
-        days.forEach(d => {
-          if (d) {
-            const user = USERS.find(u => u.id === d.assignedUserId);
-            csvContent += `${d.dateString},${d.dayNumber},"${user ? user.name : 'Sin asignar'}",24h\n`;
-          }
-        });
-
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `Cuadrante_Turnos_${currentMonth.getFullYear()}_${currentMonth.getMonth()+1}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
-
-      // EXPORTAR A PDF
-      const handleExportPDF = () => {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF();
-
-        const monthName = currentMonth.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-        
-        doc.setFontSize(16);
-        doc.setTextColor(15, 23, 42);
-        doc.text(`Cuadrante de Turnos 24h - ${monthName.toUpperCase()}`, 14, 18);
-
-        doc.setFontSize(10);
-        doc.setTextColor(100, 116, 139);
-        doc.text("Resumen mensual de cuadrante de guardia e intercambios", 14, 25);
-
-        // Tabla de estadísticas acumuladas
-        const statsRows = USERS.filter(u => !u.isAdmin).map(user => {
-          const stats = userStats[user.id] || { days: 0, hours: 0 };
-          return [user.name, `${stats.days} días`, `${stats.hours} horas`];
-        });
-
-        doc.autoTable({
-          startY: 30,
-          head: [['Trabajador', 'Días Asignados', 'Horas Acumuladas']],
-          body: statsRows,
-          theme: 'striped',
-          headStyles: { fillColor: [30, 41, 59] },
-          styles: { fontSize: 9 }
-        });
-
-        // Tabla de cuadrante diario
-        const days = getDaysInMonth().filter(Boolean);
-        const scheduleRows = days.map(d => {
-          const user = USERS.find(u => u.id === d.assignedUserId);
-          return [formatDateLabel(d.dateString), d.dayNumber, user ? user.name : 'Sin asignar', '24 Horas'];
-        });
-
-        doc.autoTable({
-          startY: doc.lastAutoTable.finalY + 10,
-          head: [['Fecha', 'Día', 'Empleado Asignado', 'Duración Turno']],
-          body: scheduleRows,
-          theme: 'grid',
-          headStyles: { fillColor: [37, 99, 235] },
-          styles: { fontSize: 8 }
-        });
-
-        doc.save(`Cuadrante_Turnos_${currentMonth.getFullYear()}_${currentMonth.getMonth()+1}.pdf`);
       };
 
       const handleOpenSwapModal = (dateString) => {
@@ -307,19 +264,26 @@
         }
       };
 
-      const handleAdminDirectAssign = (e) => {
+      const handleAdminDirectAssign = async (e) => {
         e.preventDefault();
         if (!selectedDateForSwap || !adminSelectedUser) return;
-        
-        const prevUser = USERS.find(u => u.id === shifts[selectedDateForSwap]);
-        const newUser = USERS.find(u => u.id === adminSelectedUser);
 
         setShifts(prev => ({
           ...prev,
           [selectedDateForSwap]: adminSelectedUser
         }));
 
-        // Registrar en historial como cambio por administración
+        if (isFirebaseActive && db) {
+          try {
+            await db.collection('shifts').doc(selectedDateForSwap).set({
+              assignedUserId: adminSelectedUser,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (err) {
+            console.error("Error guardando turno en Firebase:", err);
+          }
+        }
+
         const adminLog = {
           id: `req_${Date.now()}`,
           requesterId: 'usr_admin',
@@ -329,14 +293,23 @@
           status: 'approved',
           createdAt: new Date().toISOString(),
           completedAt: new Date().toISOString(),
-          notes: `Reasignación directa realizada por Administrador (Anterior: ${prevUser?.name || 'Libre'}).`
+          notes: `Reasignación directa por Administrador.`
         };
 
         setRequests(prev => [adminLog, ...prev]);
+
+        if (isFirebaseActive && db) {
+          try {
+            await db.collection('swap_requests').doc(adminLog.id).set(adminLog);
+          } catch (err) {
+            console.error("Error guardando solicitud en Firebase:", err);
+          }
+        }
+
         setAdminAssignModalOpen(false);
       };
 
-      const handleCreateSwapRequest = (e) => {
+      const handleCreateSwapRequest = async (e) => {
         e.preventDefault();
         if (!targetSwapDate) return;
 
@@ -358,33 +331,60 @@
         };
 
         setRequests(prev => [newReq, ...prev]);
+
+        if (isFirebaseActive && db) {
+          try {
+            await db.collection('swap_requests').doc(newReq.id).set(newReq);
+          } catch (err) {
+            console.error("Error enviando permuta a Firebase:", err);
+          }
+        }
+
         setSwapModalOpen(false);
       };
 
-      const handleRespondRequest = (requestId, isApproved) => {
+      const handleRespondRequest = async (requestId, isApproved) => {
         const req = requests.find(r => r.id === requestId);
         if (!req) return;
 
         const nowStr = new Date().toISOString();
+        const newStatus = isApproved ? 'approved' : 'rejected';
 
         if (isApproved) {
-          setShifts(prev => {
-            const updated = { ...prev };
-            const userA = req.requesterId;
-            const userB = req.targetUserId;
-            const dateA = req.requesterDate;
-            const dateB = req.targetDate;
-            updated[dateA] = userB;
-            updated[dateB] = userA;
-            return updated;
-          });
-          setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'approved', completedAt: nowStr } : r));
-        } else {
-          setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'rejected', completedAt: nowStr } : r));
+          const userA = req.requesterId;
+          const userB = req.targetUserId;
+          const dateA = req.requesterDate;
+          const dateB = req.targetDate;
+
+          setShifts(prev => ({
+            ...prev,
+            [dateA]: userB,
+            [dateB]: userA
+          }));
+
+          if (isFirebaseActive && db) {
+            try {
+              await db.collection('shifts').doc(dateA).set({ assignedUserId: userB });
+              await db.collection('shifts').doc(dateB).set({ assignedUserId: userA });
+            } catch (err) {
+              console.error("Error actualizando turnos en Firebase:", err);
+            }
+          }
+        }
+
+        setRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: newStatus, completedAt: nowStr } : r));
+
+        if (isFirebaseActive && db) {
+          try {
+            await db.collection('swap_requests').doc(requestId).update({
+              status: newStatus,
+              completedAt: nowStr
+            });
+          } catch (err) {
+            console.error("Error actualizando estado en Firebase:", err);
+          }
         }
       };
-
-      const currentMonthName = currentMonth.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
 
       const getDaysInMonth = () => {
         const days = [];
@@ -406,106 +406,65 @@
             assignedUserId: shifts[dateString] || null
           });
         }
+
         return days;
       };
 
       const userStats = USERS.reduce((acc, user) => {
         const totalDays = Object.values(shifts).filter(userId => userId === user.id).length;
-        acc[user.id] = { days: totalDays, hours: totalDays * 24 };
+        acc[user.id] = {
+          days: totalDays,
+          hours: totalDays * 24
+        };
         return acc;
       }, {});
 
-      const pendingReceived = requests.filter(r => r.targetUserId === currentUser.id && r.status === 'pending');
-
-      // Filtrado para el Historial de Cambios por Mes
-      const filteredHistory = requests.filter(req => {
-        const dateToCheck = req.completedAt || req.createdAt;
-        return dateToCheck.startsWith(historyFilterMonth);
-      });
+      const currentMonthName = currentMonth.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
 
       return (
-        <div className="min-h-screen flex flex-col">
+        <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans">
           {/* CABECERA */}
           <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-            <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="p-2 bg-blue-600 rounded-lg text-white">
+                <div className="p-2 bg-blue-600 rounded-lg text-white shadow-md">
                   <i data-lucide="calendar" className="w-6 h-6"></i>
                 </div>
                 <div>
-                  <h1 className="font-bold text-lg text-slate-900 leading-tight">Turnos 24 Horas</h1>
-                  <p className="text-xs text-slate-500">Gestión de Cuadrante y Notificaciones de Permuta</p>
+                  <h1 className="font-bold text-lg leading-tight text-slate-900">GestorTurnos 24h</h1>
+                  <p className="text-xs text-slate-500">Sistema en Tiempo Real con Firebase</p>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-4">
-                {/* SELECTOR DE USUARIO */}
+              <div className="flex items-center space-x-3">
                 <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-                  <span className="text-xs text-slate-500 font-medium px-2 hidden md:inline">Usuario activo:</span>
+                  <span className="text-xs text-slate-500 font-medium px-2 hidden md:inline">Usuario:</span>
                   <select 
                     value={currentUser.id}
-                    onChange={(e) => setCurrentUser(USERS.find(u => u.id === e.target.value))}
-                    className="bg-white text-xs font-semibold text-slate-700 py-1 px-2.5 rounded-lg border border-slate-200 shadow-sm focus:outline-none cursor-pointer"
+                    onChange={(e) => {
+                      const selected = USERS.find(u => u.id === e.target.value);
+                      if (selected) setCurrentUser(selected);
+                    }}
+                    className="bg-white text-xs font-semibold text-slate-700 py-1 px-2.5 rounded-lg border border-slate-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                   >
                     {USERS.map(user => (
                       <option key={user.id} value={user.id}>
-                        {user.name} {user.isAdmin ? '(Administrador)' : ''}
+                        {user.name}
                       </option>
                     ))}
                   </select>
-                </div>
-
-                {/* NOTIFICACIONES CAMPANA */}
-                <div className="relative">
-                  <button 
-                    onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                    className="p-2 text-slate-600 hover:bg-slate-100 rounded-full relative"
-                  >
-                    <i data-lucide="bell" className="w-5 h-5"></i>
-                    {pendingReceived.length > 0 && (
-                      <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
-                    )}
-                  </button>
-
-                  {isNotificationsOpen && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-200 z-50 p-3 space-y-2">
-                      <div className="flex justify-between items-center border-b pb-2">
-                        <span className="text-xs font-bold text-slate-800">Alertas de Permuta</span>
-                        <button onClick={() => setIsNotificationsOpen(false)} className="text-xs text-slate-400">Cerrar</button>
-                      </div>
-
-                      {pendingReceived.length === 0 ? (
-                        <p className="text-xs text-slate-400 text-center py-4">No tienes solicitudes pendientes.</p>
-                      ) : (
-                        pendingReceived.map(req => {
-                          const requester = USERS.find(u => u.id === req.requesterId);
-                          return (
-                            <div key={req.id} className="p-2 bg-blue-50 rounded-lg border border-blue-100 text-xs space-y-1.5">
-                              <p className="font-semibold text-slate-800">
-                                <span className="font-bold">{requester?.name}</span> solicita cambiar su día {formatDateLabel(req.requesterDate)} por tu día {formatDateLabel(req.targetDate)}.
-                              </p>
-                              <div className="flex gap-2">
-                                <button onClick={() => handleRespondRequest(req.id, true)} className="bg-emerald-600 text-white px-2 py-1 rounded font-bold text-[10px]">Aceptar</button>
-                                <button onClick={() => handleRespondRequest(req.id, false)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded font-bold text-[10px]">Rechazar</button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
           </header>
 
-          <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
-            {/* LEYENDA TIPO LISTA CON DÍAS Y HORAS */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-              <h2 className="text-sm font-bold text-slate-800 mb-3">Horas Acumuladas y Conteo de Días (Mes Actual)</h2>
+          {/* CONTENIDO PRINCIPAL */}
+          <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+            {/* RESUMEN DE EQUIPO */}
+            <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200">
+              <h2 className="text-sm font-bold text-slate-800 mb-3">Equipo y Horas Acumuladas</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {USERS.map(user => {
-                  const isCurrent = user.id === currentUser.id;
                   const stats = userStats[user.id] || { days: 0, hours: 0 };
                   return (
                     <div key={user.id} className={`flex items-center justify-between p-3 rounded-xl border ${user.lightBg} ${user.border}`}>
@@ -513,98 +472,62 @@
                         <div className={`w-8 h-8 rounded-full ${user.color} text-white flex items-center justify-center font-bold text-xs`}>
                           {user.avatar}
                         </div>
-                        <div className="truncate max-w-[170px]">
-                          <p className="font-bold text-xs text-slate-800 truncate">{user.name} {isCurrent && '(Tú)'}</p>
-                          <span className="text-[10px] text-slate-500 font-semibold block">{user.isAdmin ? 'Administrador' : 'Turno 24h'}</span>
+                        <div>
+                          <div className="font-bold text-xs text-slate-800">{user.name}</div>
+                          {user.isAdmin ? (
+                            <span className="text-[10px] text-slate-500 font-semibold">Superusuario</span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500">{stats.days} días / {stats.hours}h tot.</span>
+                          )}
                         </div>
                       </div>
-                      
-                      {/* SI ES ADMINISTRADOR SE OCULTAN DÍAS Y HORAS, SE MUESTRA INSIGNIA DE GESTIÓN */}
-                      {user.isAdmin ? (
-                        <div className="text-right bg-slate-200/60 px-2.5 py-1 rounded-lg border border-slate-300 text-[11px] font-bold text-slate-700">
-                          Superusuario
-                        </div>
-                      ) : (
-                        <div className="text-right bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-xs">
-                          <div className="font-bold text-slate-800">{stats.days} días</div>
-                          <div className="font-semibold text-blue-600">{stats.hours}h tot.</div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            {/* CALENDARIO DE TURNOS CON BOTONES DE EXPORTACIÓN */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-200 flex flex-wrap justify-between items-center bg-slate-50 gap-3">
-                <div className="flex items-center gap-3">
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-800 capitalize">{currentMonthName}</h2>
-                    {currentUser.isAdmin && (
-                      <span className="bg-slate-900 text-amber-400 text-xs px-3 py-0.5 rounded-full font-bold">
-                        Modo Administrador Activado
-                      </span>
-                    )}
-                  </div>
-                  {/* CONTROLES NAVEGACIÓN MES Y BOTÓN HOY */}
-                  <div className="flex items-center gap-1 border border-slate-200 rounded-lg p-1 bg-white">
-                    <button 
-                      onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
-                      className="p-1 text-slate-600 hover:bg-slate-100 rounded"
-                      title="Mes anterior"
-                    >
-                      <i data-lucide="chevron-left" className="w-4 h-4"></i>
-                    </button>
-                    <button 
-                      onClick={() => setCurrentMonth(new Date(2026, 10, 1))}
-                      className="px-2.5 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded"
-                    >
-                      Hoy
-                    </button>
-                    <button 
-                      onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
-                      className="p-1 text-slate-600 hover:bg-slate-100 rounded"
-                      title="Mes siguiente"
-                    >
-                      <i data-lucide="chevron-right" className="w-4 h-4"></i>
-                    </button>
-                  </div>
-                </div>
-
-                {/* BOTONES EXPORTAR PDF / EXCEL */}
-                <div className="flex items-center space-x-2">
+            {/* CALENDARIO */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-4 sm:p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+                <h2 className="text-xl font-bold text-slate-800 capitalize">{currentMonthName}</h2>
+                <div className="flex items-center gap-2">
                   <button 
-                    onClick={handleExportPDF}
-                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+                    onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
+                    className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600"
                   >
-                    <i data-lucide="file-text" className="w-4 h-4"></i>
-                    Exportar PDF
+                    <i data-lucide="chevron-left" className="w-5 h-5"></i>
                   </button>
                   <button 
-                    onClick={handleExportCSV}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors"
+                    onClick={() => setCurrentMonth(new Date(2026, 10, 1))}
+                    className="px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold rounded-lg"
                   >
-                    <i data-lucide="download" className="w-4 h-4"></i>
-                    Exportar Excel (CSV)
+                    Hoy
+                  </button>
+                  <button 
+                    onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                    className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600"
+                  >
+                    <i data-lucide="chevron-right" className="w-5 h-5"></i>
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-7 bg-slate-100 text-center text-xs font-bold text-slate-600 py-2">
+              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-100 text-center text-xs font-bold text-slate-600 py-2.5">
                 <div>LUN</div><div>MAR</div><div>MIÉ</div><div>JUE</div><div>VIE</div><div>SÁB</div><div>DOM</div>
               </div>
 
-              <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 bg-slate-200/50">
+              <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 bg-slate-200/40">
                 {getDaysInMonth().map((dayData, index) => {
-                  if (!dayData) return <div key={`empty-${index}`} className="bg-slate-50 min-h-[100px]" />;
+                  if (!dayData) {
+                    return <div key={`empty-${index}`} className="bg-slate-50/50 min-h-[100px]" />;
+                  }
 
                   const assignedUser = USERS.find(u => u.id === dayData.assignedUserId);
                   const isUserShift = dayData.assignedUserId === currentUser.id;
 
                   return (
-                    <div key={dayData.dateString} className="min-h-[110px] bg-white p-2 flex flex-col justify-between">
+                    <div key={dayData.dateString} className="min-h-[100px] bg-white p-2 flex flex-col justify-between">
                       <div className="flex justify-between items-start">
                         <span className={`text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center ${isUserShift ? 'bg-blue-600 text-white' : 'text-slate-700'}`}>
                           {dayData.dayNumber}
@@ -612,20 +535,20 @@
                       </div>
 
                       {assignedUser ? (
-                        <div className={`p-2 rounded-xl border ${assignedUser.lightBg} ${assignedUser.border}`}>
-                          <p className={`text-xs font-bold ${assignedUser.text}`}>{assignedUser.name}</p>
-                          <span className="text-[10px] text-slate-500">24 Horas</span>
+                        <div className={`mt-2 p-2 rounded-xl border ${assignedUser.lightBg} ${assignedUser.border}`}>
+                          <div className="text-xs font-bold truncate">{assignedUser.name}</div>
+                          <div className="text-[10px] text-slate-500">Servicio 24h</div>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400 italic">Libre</span>
+                        <div className="text-[11px] text-slate-400 italic">Sin asignación</div>
                       )}
 
                       {(isUserShift || currentUser.isAdmin) && (
                         <button 
                           onClick={() => handleOpenSwapModal(dayData.dateString)}
-                          className={`w-full py-1 rounded-lg text-[11px] font-bold mt-1 ${currentUser.isAdmin ? 'bg-slate-900 text-amber-400' : 'bg-blue-600 text-white'}`}
+                          className="mt-2 w-full py-1 px-2 rounded-lg text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white"
                         >
-                          {currentUser.isAdmin ? 'Cambiar (Admin)' : 'Solicitar Permuta'}
+                          {currentUser.isAdmin ? 'Reasignar (Admin)' : 'Cambiar turno'}
                         </button>
                       )}
                     </div>
@@ -633,154 +556,7 @@
                 })}
               </div>
             </div>
-
-            {/* SECCIÓN HISTORIAL DE CAMBIOS POR MES */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-base">Historial Mensual de Cambios</h3>
-                  <p className="text-xs text-slate-500">Registro completo de permutas aceptadas, rechazadas y modificaciones de administración</p>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-semibold text-slate-600">Filtrar Mes:</span>
-                  <input 
-                    type="month" 
-                    value={historyFilterMonth}
-                    onChange={(e) => setHistoryFilterMonth(e.target.value)}
-                    className="border border-slate-300 rounded-lg text-xs p-1.5 font-semibold text-slate-700 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-600">
-                  <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                    <tr>
-                      <th className="py-2.5 px-3">Fecha de Registro</th>
-                      <th className="py-2.5 px-3">Solicitante / Emisor</th>
-                      <th className="py-2.5 px-3">Día Afectado</th>
-                      <th className="py-2.5 px-3">Receptor / Destino</th>
-                      <th className="py-2.5 px-3">Día Permutado</th>
-                      <th className="py-2.5 px-3">Estado Final</th>
-                      <th className="py-2.5 px-3">Notas</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan="7" className="py-6 text-center text-slate-400 italic">
-                          No hay registro de cambios o permutas para el mes seleccionado ({historyFilterMonth}).
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredHistory.map(log => {
-                        const requester = USERS.find(u => u.id === log.requesterId);
-                        const target = USERS.find(u => u.id === log.targetUserId);
-                        const recordDate = log.completedAt ? formatDateLabel(log.completedAt.split('T')[0]) : formatDateLabel(log.createdAt.split('T')[0]);
-
-                        return (
-                          <tr key={log.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-500">{recordDate}</td>
-                            <td className="py-2.5 px-3 font-bold text-slate-800">{requester?.name || 'Administrador'}</td>
-                            <td className="py-2.5 px-3 font-bold text-blue-600">{formatDateLabel(log.requesterDate)}</td>
-                            <td className="py-2.5 px-3 font-bold text-slate-800">{target?.name}</td>
-                            <td className="py-2.5 px-3 font-bold text-blue-600">{formatDateLabel(log.targetDate)}</td>
-                            <td className="py-2.5 px-3">
-                              {log.status === 'approved' && (
-                                <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md text-[11px]">
-                                  Aceptado / Efectuado
-                                </span>
-                              )}
-                              {log.status === 'rejected' && (
-                                <span className="bg-red-100 text-red-800 font-bold px-2 py-0.5 rounded-md text-[11px]">
-                                  Rechazado
-                                </span>
-                              )}
-                              {log.status === 'pending' && (
-                                <span className="bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-md text-[11px]">
-                                  Pendiente
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-slate-500 italic max-w-xs truncate">{log.notes || '-'}</td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </main>
-
-          {/* MODAL SOLICITUD EMPLEADO */}
-          {swapModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-                <h3 className="font-bold text-slate-800 text-base mb-3">Solicitar Permuta de Día</h3>
-                <form onSubmit={handleCreateSwapRequest} className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-500 font-bold block mb-1">Tu día asignado:</label>
-                    <input type="text" disabled value={formatDateLabel(selectedDateForSwap)} className="w-full bg-slate-100 p-2 text-xs font-bold rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500 font-bold block mb-1">Día que deseas a cambio:</label>
-                    <select 
-                      required 
-                      value={targetSwapDate} 
-                      onChange={(e) => setTargetSwapDate(e.target.value)}
-                      className="w-full p-2 border border-slate-300 rounded-lg text-xs"
-                    >
-                      <option value="">-- Selecciona fecha del cuadrante --</option>
-                      {Object.keys(shifts).map(dateStr => {
-                        if (dateStr === selectedDateForSwap) return null;
-                        const w = USERS.find(u => u.id === shifts[dateStr]);
-                        return <option key={dateStr} value={dateStr}>{formatDateLabel(dateStr)} - Asignado a {w?.name}</option>;
-                      })}
-                    </select>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button type="button" onClick={() => setSwapModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-slate-500">Cancelar</button>
-                    <button type="submit" className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold">Enviar Solicitud</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* MODAL CAMBIO DIRECTO ADMINISTRADOR */}
-          {adminAssignModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-                <h3 className="font-bold text-slate-900 text-base mb-2">Reasignación Directa Administrador</h3>
-                <p className="text-xs text-slate-500 mb-4">Como administrador, este cambio se aplicará al instante sin aprobación.</p>
-                <form onSubmit={handleAdminDirectAssign} className="space-y-3">
-                  <div>
-                    <label className="text-xs text-slate-500 font-bold block mb-1">Fecha seleccionada:</label>
-                    <input type="text" disabled value={formatDateLabel(selectedDateForSwap)} className="w-full bg-slate-100 p-2 text-xs font-bold rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-500 font-bold block mb-1">Asignar a:</label>
-                    <select 
-                      required 
-                      value={adminSelectedUser} 
-                      onChange={(e) => setAdminSelectedUser(e.target.value)}
-                      className="w-full p-2 border border-slate-300 rounded-lg text-xs font-bold"
-                    >
-                      {USERS.filter(u => !u.isAdmin).map(u => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button type="button" onClick={() => setAdminAssignModalOpen(false)} className="px-3 py-1.5 text-xs font-bold text-slate-500">Cancelar</button>
-                    <button type="submit" className="px-3 py-1.5 bg-slate-900 text-amber-400 rounded-lg text-xs font-bold">Cambiar Inmediatamente</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
       );
     }
@@ -789,6 +565,3 @@
   </script>
 </body>
 </html>
-```
-
-¿Qué paso seguimos ahora? ¿Te guío en la creación del repositorio en GitHub o en algún punto en concreto?
