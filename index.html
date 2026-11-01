@@ -4,6 +4,29 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gestión de Turnos 24h</title>
+
+  <!-- CONFIGURACIÓN PWA Y APARIENCIA DE APP NATIVA (APK) -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Turnos 24h">
+  <meta name="theme-color" content="#0f172a">
+
+  <!-- MANIFIESTO PWA COMPLETO PARA ICONO EN PANTALLA DE INICIO (ANDROID Y IOS) -->
+  <link rel="manifest" href="data:application/manifest+json;utf8,{
+    %22short_name%22:%22Turnos 24h%22,
+    %22name%22:%22Gestión de Turnos 24 Horas%22,
+    %22icons%22:[{%22src%22:%22data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='110' fill='%230f172a'/><circle cx='256' cy='256' r='200' fill='none' stroke='%233b82f6' stroke-width='24' stroke-dasharray='30 15'/><text x='51%' y='58%' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='190' fill='%23ffffff'>24h</text></svg>%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22,%22purpose%22:%22any maskable%22}],
+    %22start_url%22:%22.%22,
+    %22background_color%22:%22%230f172a%22,
+    %22theme_color%22:%22%230f172a%22,
+    %22display%22:%22standalone%22
+  }">
+
+  <!-- ICONO OFICIAL CON LOGO 24H -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='110' fill='%230f172a'/><circle cx='256' cy='256' r='200' fill='none' stroke='%233b82f6' stroke-width='24' stroke-dasharray='30 15'/><text x='51%' y='58%' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='190' fill='%23ffffff'>24h</text></svg>">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='110' fill='%230f172a'/><circle cx='256' cy='256' r='200' fill='none' stroke='%233b82f6' stroke-width='24' stroke-dasharray='30 15'/><text x='51%' y='58%' text-anchor='middle' font-family='Arial, sans-serif' font-weight='900' font-size='190' fill='%23ffffff'>24h</text></svg>">
+
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React & React DOM -->
