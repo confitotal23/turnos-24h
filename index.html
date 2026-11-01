@@ -56,22 +56,16 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // CONFIGURACIÓN DE FIREBASE (MANTÉN TUS CLAVES AQUÍ)
-    const firebaseConfig = {
-
-  apiKey: "AIzaSyAGgDMwopsVMHCJvzwzqvwPOVZdZeUXSsI",
-
-  authDomain: "turnos-24h.firebaseapp.com",
-
-  projectId: "turnos-24h",
-
-  storageBucket: "turnos-24h.firebasestorage.app",
-
-  messagingSenderId: "876085873669",
-
-  appId: "1:876085873669:web:dc844cd619b09e1b88606c"
-
-};
+    // INTENTO DE CÁRGA DE CLAVES ALMACENADAS AUTOMÁTICAMENTE
+    const savedConfig = localStorage.getItem('firebase_custom_config');
+    let firebaseConfig = savedConfig ? JSON.parse(savedConfig) : {
+      apiKey: "AIzaSyAGgDMwopsVMHCJvzwzqvwPOVZdZeUXSsI",
+      authDomain: "turnos-24h.firebaseapp.com",
+      projectId: "turnos-24h",
+      storageBucket: "turnos-24h.firebasestorage.app",
+      messagingSenderId: "876085873669",
+      appId: "1:876085873669:web:dc844cd619b09e1b88606c"
+    };
 
     // Inicializar Firebase de forma segura
     let isFirebaseActive = false;
@@ -79,11 +73,15 @@
     let auth = null;
 
     try {
-      if (firebaseConfig.apiKey !== "PEGA_AQUI_TU_API_KEY") {
-        firebase.initializeApp(firebaseConfig);
+      if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "AIzaSyAGgDMwopsVMHCJvzwzqvwPOVZdZeUXSsI") {
+        if (!firebase.apps.length) {
+          firebase.initializeApp(firebaseConfig);
+        }
         db = firebase.firestore();
         auth = firebase.auth();
         isFirebaseActive = true;
+        // Guardar para futuras sesiones/actualizaciones de index.html
+        localStorage.setItem('firebase_custom_config', JSON.stringify(firebaseConfig));
       }
     } catch (e) {
       console.warn("Error o falta de clave en Firebase:", e);
@@ -268,6 +266,7 @@
         e.preventDefault();
         if (!selectedDateForSwap || !adminSelectedUser) return;
 
+        // Actualizar el estado local inmediatamente
         setShifts(prev => ({
           ...prev,
           [selectedDateForSwap]: adminSelectedUser
@@ -278,7 +277,7 @@
             await db.collection('shifts').doc(selectedDateForSwap).set({
               assignedUserId: adminSelectedUser,
               updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            }, { merge: true });
           } catch (err) {
             console.error("Error guardando turno en Firebase:", err);
           }
@@ -330,6 +329,7 @@
           notes: swapNote
         };
 
+        // Guardar localmente
         setRequests(prev => [newReq, ...prev]);
 
         if (isFirebaseActive && db) {
@@ -350,6 +350,7 @@
         const nowStr = new Date().toISOString();
         const newStatus = isApproved ? 'approved' : 'rejected';
 
+        // 1. Actualizar estado local inmediatamente
         if (isApproved) {
           const userA = req.requesterId;
           const userB = req.targetUserId;
@@ -364,8 +365,8 @@
 
           if (isFirebaseActive && db) {
             try {
-              await db.collection('shifts').doc(dateA).set({ assignedUserId: userB });
-              await db.collection('shifts').doc(dateB).set({ assignedUserId: userA });
+              await db.collection('shifts').doc(dateA).set({ assignedUserId: userB }, { merge: true });
+              await db.collection('shifts').doc(dateB).set({ assignedUserId: userA }, { merge: true });
             } catch (err) {
               console.error("Error actualizando turnos en Firebase:", err);
             }
@@ -376,10 +377,10 @@
 
         if (isFirebaseActive && db) {
           try {
-            await db.collection('swap_requests').doc(requestId).update({
+            await db.collection('swap_requests').doc(requestId).set({
               status: newStatus,
               completedAt: nowStr
-            });
+            }, { merge: true });
           } catch (err) {
             console.error("Error actualizando estado en Firebase:", err);
           }
