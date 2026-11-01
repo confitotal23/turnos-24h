@@ -39,6 +39,12 @@
   <!-- jsPDF for PDF export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- SDKs OFICIALES DE FIREBASE (AUTENTICACIÓN Y FIRESTORE) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
@@ -49,6 +55,40 @@
 
   <script type="text/babel">
     const { useState, useEffect } = React;
+
+    // CONFIGURACIÓN DE FIREBASE (CONECTAR CON LA CONSOLA)
+    const firebaseConfig = {
+
+  apiKey: "AIzaSyAGgDMwopsVMHCJvzwzqvwPOVZdZeUXSsI",
+
+  authDomain: "turnos-24h.firebaseapp.com",
+
+  projectId: "turnos-24h",
+
+  storageBucket: "turnos-24h.firebasestorage.app",
+
+  messagingSenderId: "876085873669",
+
+  appId: "1:876085873669:web:dc844cd619b09e1b88606c"
+
+};
+
+
+    // Inicializar Firebase de forma segura (con fallback a local si no está configurado)
+    let isFirebaseActive = false;
+    let db = null;
+    let auth = null;
+
+    try {
+      if (firebaseConfig.apiKey !== "PEGA_AQUI_TU_API_KEY") {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        auth = firebase.auth();
+        isFirebaseActive = true;
+      }
+    } catch (e) {
+      console.warn("Firebase no configurado aún. Usando almacenamiento local temporal.");
+    }
 
     // 1. CONFIGURACIÓN DE NOMBRES Y CUENTAS GMAIL REALES (CORREOS OCULTOS EN INTERFAZ)
     const USERS = [
